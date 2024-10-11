@@ -6,8 +6,11 @@ chrome.action.onClicked.addListener((tab) => {
       target: { tabId: tab.id },
       func: scrollToBottom
     }, async () => {
-      // スクロール完了後、PDFを生成
-      await generatePdf(tab.id);
+      // スクロール完了後、10秒待つ
+      setTimeout(async () => {
+        // 10秒後にPDFを生成
+        await generatePdf(tab.id);
+      }, 10000); // 10秒 = 10000ミリ秒
     });
   }
 });
@@ -16,6 +19,7 @@ chrome.action.onClicked.addListener((tab) => {
 function scrollToBottom() {
   window.scrollTo(0, document.body.scrollHeight);
 }
+
 
 // ページの全体高さを取得する関数
 function getPageHeight(tabId) {
