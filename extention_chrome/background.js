@@ -1,17 +1,20 @@
 // アイコンクリック時に実行されるイベントリスナー
-chrome.action.onClicked.addListener((tab) => {
+chrome.action.onClicked.addListener(async (tab) => {
   if (tab.id) {
     // ページを一番下までスクロール
-    chrome.scripting.executeScript({
+    await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: scrollToBottom
-    }, async () => {
-      // スクロール完了後、10秒待つ
-      setTimeout(async () => {
-        // 10秒後にPDFを生成
-        await generatePdf(tab.id);
-      }, 10000); // 10秒 = 10000ミリ秒
     });
+
+    // 画像の読み込みを待つ
+    await chrome.scripting.executeScript({
+      target: { tabId: tab.id },
+      func: waitForImagesToLoad
+    });
+
+    // 画像の読み込みが完了したら、PDFを生成
+    await generatePdf(tab.id);
   }
 });
 
@@ -20,6 +23,45 @@ function scrollToBottom() {
   window.scrollTo(0, document.body.scrollHeight);
 }
 
+// ページ内のすべての画像の読み込みを待機する関数
+function waitForImagesToLoad() {
+  return new Promise((resolve) => {
+    const images = document.images;
+    let loadedCount = 0;
+    const totalImages = images.length;
+
+    if (totalImages === 0) {
+      resolve();
+      return;
+    }
+
+    for (let img of images) {
+      if (img.complete) {
+        loadedCount++;
+      } else {
+        img.addEventListener('load', () => {
+          loadedCount++;
+          if (loadedCount === totalImages) {
+            resolve();
+          }
+        });
+        img.addEventListener('error', () => {
+          loadedCount++;
+          if (loadedCount === totalImages) {
+            resolve();
+          }
+        });
+      }
+    }
+
+    // すべての画像が既に読み込まれている場合
+    if (loadedCount === totalImages) {
+      resolve();
+    }
+  });
+}
+
+// 以下、他の関数は変更なし
 
 // ページの全体高さを取得する関数
 function getPageHeight(tabId) {
