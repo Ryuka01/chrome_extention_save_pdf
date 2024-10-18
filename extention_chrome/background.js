@@ -1,88 +1,63 @@
 // アイコンクリック時に実行されるイベントリスナー
-chrome.action.onClicked.addListener(async (tab) => {
+chrome.action.onClicked.addListener((tab) => {
   if (tab.id) {
-    // ページを一番下までスクロール
-    await chrome.scripting.executeScript({
+    // ページを一番下までスクロールし、遅延読み込みをトリガー
+    chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: scrollToBottom
+      func: scrollThroughPageAndLoadImages
+    }, () => {
+      // 画像の読み込み完了を待つ
+      chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: waitForAllImagesToLoad
+      }, async () => {
+      // スクロール完了後、10秒待つ
+      setTimeout(async () => {
+        // 10秒後にPDFを生成
+        await generatePdf(tab.id);
+      }, 10000); // 10秒 = 10000ミリ秒
     });
-
-    // 画像の読み込みを待つ
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: waitForImagesToLoad
     });
-
-    // 画像の読み込みが完了したら、PDFを生成
-    await generatePdf(tab.id);
   }
 });
 
-// ページを一番下までスクロールする関数
-function scrollToBottom() {
-  window.scrollTo(0, document.body.scrollHeight);
+// ページをゆっくりスクロールして遅延読み込みをトリガーする関数
+function scrollThroughPageAndLoadImages() {
+  const totalHeight = document.body.scrollHeight;
+  let currentPosition = 0;
+  const scrollStep = window.innerHeight / 2; // スクロールのステップサイズ
+  const delay = 200; // スクロール間の待機時間（ミリ秒）
+
+  function scrollDown() {
+    currentPosition += scrollStep;
+    window.scrollTo(0, currentPosition);
+
+    if (currentPosition < totalHeight) {
+      setTimeout(scrollDown, delay);
+    } else {
+      // スクロール完了後にページを一番上に戻す
+      window.scrollTo(0, 0);
+    }
+  }
+
+  scrollDown();
 }
 
-// ページ内のすべての画像の読み込みを待機する関数
-function waitForImagesToLoad() {
-  return new Promise((resolve) => {
-    const images = document.images;
-    let loadedCount = 0;
-    const totalImages = images.length;
+// すべての画像が読み込まれるのを待つ関数
+function waitForAllImagesToLoad() {
+  const images = Array.from(document.images);
+  let unloadedImages = images.filter(img => !img.complete || img.naturalWidth === 0);
 
-    if (totalImages === 0) {
-      resolve();
-      return;
+  if (unloadedImages.length === 0) {
+    return;
+  }
+
+  let checkInterval = setInterval(() => {
+    unloadedImages = unloadedImages.filter(img => !img.complete || img.naturalWidth === 0);
+    if (unloadedImages.length === 0) {
+      clearInterval(checkInterval);
     }
-
-    for (let img of images) {
-      if (img.complete) {
-        loadedCount++;
-      } else {
-        img.addEventListener('load', () => {
-          loadedCount++;
-          if (loadedCount === totalImages) {
-            resolve();
-          }
-        });
-        img.addEventListener('error', () => {
-          loadedCount++;
-          if (loadedCount === totalImages) {
-            resolve();
-          }
-        });
-      }
-    }
-
-    // すべての画像が既に読み込まれている場合
-    if (loadedCount === totalImages) {
-      resolve();
-    }
-  });
-}
-
-// 以下、他の関数は変更なし
-
-// ページの全体高さを取得する関数
-function getPageHeight(tabId) {
-  return new Promise((resolve, reject) => {
-    chrome.scripting.executeScript(
-      {
-        target: { tabId: tabId },
-        func: () => {
-          return document.documentElement.scrollHeight;
-        },
-      },
-      (results) => {
-        if (chrome.runtime.lastError) {
-          reject(chrome.runtime.lastError.message);
-        } else {
-          const [result] = results;
-          resolve(result.result);
-        }
-      }
-    );
-  });
+  }, 1000); // 1秒ごとにチェック
 }
 
 // ピクセルをインチに変換する関数（DPIは96と仮定）
@@ -111,10 +86,8 @@ function showSuccess(message) {
 }
 
 // PDFを生成し、ダウンロードする関数
-async function generatePdf(tabId) {
-  try {
-    // ページの全体高さを取得
-    const pageHeightPx = await getPageHeight(tabId);
+function generatePdf(tabId) {
+  getPageHeight(tabId).then((pageHeightPx) => {
     const dpi = 96; // デフォルトDPI
     const paperWidth = 8.27 * 2; // A4サイズの幅（インチ）
     const paperHeight = pixelsToInches(pageHeightPx, dpi);
@@ -191,8 +164,30 @@ async function generatePdf(tabId) {
         });
       });
     });
-  } catch (error) {
+  }).catch((error) => {
     console.error('Error generating PDF:', error);
     showError(error.toString());
-  }
+  });
+}
+
+// ページの全体高さを取得する関数
+function getPageHeight(tabId) {
+  return new Promise((resolve, reject) => {
+    chrome.scripting.executeScript(
+      {
+        target: { tabId: tabId },
+        func: () => {
+          return document.documentElement.scrollHeight;
+        },
+      },
+      (results) => {
+        if (chrome.runtime.lastError) {
+          reject(chrome.runtime.lastError.message);
+        } else {
+          const [result] = results;
+          resolve(result.result);
+        }
+      }
+    );
+  });
 }
